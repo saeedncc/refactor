@@ -8,17 +8,19 @@ use DTApi\Models\Distance;
 use Illuminate\Http\Request;
 use DTApi\Repository\BookingRepository;
 
+
+use DTApi\Http\Requests\BookingStoreRequest;
+use DTApi\Http\Requests\BookingUpdateRequest;
+
+use DTApi\Events\BookingEmail;
+
 /**
  * Class BookingController
  * @package DTApi\Http\Controllers
  */
-class BookingController extends Controller
+class BookingController extends BaseController
 {
 
-    /**
-     * @var BookingRepository
-     */
-    protected $repository;
 
     /**
      * BookingController constructor.
@@ -63,13 +65,71 @@ class BookingController extends Controller
      * @param Request $request
      * @return mixed
      */
-    public function store(Request $request)
+    public function store(BookingStoreRequest $request)
     {
-        $data = $request->all();
+		
+		$this->isauthorize('viewAny','App\Models\project','Translator can not create booking');
+		
+        $data = $request->safe();
 
-        $response = $this->repository->store($request->__authenticatedUser, $data);
+		if ($data['immediate'] !== 'yes') {
+			$due = $data['due_date'] . " " . $data['due_time'];
+			$due_carbon = Carbon::createFromFormat('m/d/Y H:i', $due);
+			
+			$data['due'] = $due_carbon->format('Y-m-d H:i:s');
+			if ($due_carbon->isPast()) {
+				$this->responseError("Can't create booking in past");
+			}
+		}
+		
+		
+		$data['gender']=in_array('male', $data['job_for'])?'male':'female';
+		
 
-        return response($response);
+		
+		if (in_array('normal', $data['job_for'])) {
+			$data['certified'] = 'normal';
+		}
+		else if (in_array('certified', $data['job_for'])) {
+			$data['certified'] = 'yes';
+		} else if (in_array('certified_in_law', $data['job_for'])) {
+			$data['certified'] = 'law';
+		} else if (in_array('certified_in_helth', $data['job_for'])) {
+			$data['certified'] = 'health';
+		}
+			
+			
+			
+		if (in_array('normal', $data['job_for']) && in_array('certified', $data['job_for'])) {
+			$data['certified'] = 'both';
+		}
+		else if(in_array('normal', $data['job_for']) && in_array('certified_in_law', $data['job_for']))
+		{
+			$data['certified'] = 'n_law';
+		}
+		else if(in_array('normal', $data['job_for']) && in_array('certified_in_helth', $data['job_for']))
+		{
+			$data['certified'] = 'n_health';
+		}
+		
+		
+		if ($consumer_type == 'rwsconsumer')
+			$data['job_type'] = 'rws';
+		else if ($consumer_type == 'ngo')
+			$data['job_type'] = 'unpaid';
+		else if ($consumer_type == 'paid')
+			$data['job_type'] = 'paid';
+		
+		$data['b_created_at'] = date('Y-m-d H:i:s');
+		
+		if (isset($due))
+                $data['will_expire_at'] = TeHelper::willExpireAt($due, $data['b_created_at']);
+			
+        $data['by_admin'] = isset($data['by_admin']) ? $data['by_admin'] : 'no';
+
+        $response = $this->repository->store($data);
+
+        return $this->responseOk($response);
 
     }
 
@@ -78,13 +138,19 @@ class BookingController extends Controller
      * @param Request $request
      * @return mixed
      */
-    public function update($id, Request $request)
+    public function update($id, BookingUpdateRequest $request)
     {
-        $data = $request->all();
-        $cuser = $request->__authenticatedUser;
-        $response = $this->repository->updateJob($id, array_except($data, ['_token', 'submit']), $cuser);
+        $data = $request->safe()->except(['_token','submit']);
+		
+		$item=$this->repository->find($id);
 
-        return response($response);
+		
+        $response = $this->repository->update($item, $data);
+		
+		
+		BookingEmail::dispatch($request);
+		
+        return $this->responseOk($response);
     }
 
     /**

@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use DTApi\Exceptions\ValidationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
-class BaseRepository
+class BaseRepository implements IRepository
 {
 
     /**
